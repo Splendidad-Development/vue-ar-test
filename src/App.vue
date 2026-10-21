@@ -1,7 +1,7 @@
 <script setup>
-import HelloWorld from './components/HelloWorld.vue'
+import ARExperience from './views/ARExperience.vue'
 </script>
 
 <template>
-  <HelloWorld />
+  <ARExperience />
 </template>
