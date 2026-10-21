@@ -5,7 +5,14 @@ import DestinationContent from '../components/DestinationContent.vue'
 import TracePath from '../components/TracePath.vue'
 import { cameraError, useCamera } from '../composables/useCamera.js'
 import { useExperienceState } from '../composables/useExperienceState.js'
-import { defaultDestinationId, destinations, tracePath, traceRules } from '../config/destinations.js'
+import {
+  defaultDestinationId,
+  destinations,
+  failureDestination,
+  forkOptions,
+  tracePaths,
+  traceRules,
+} from '../config/destinations.js'
 
 const { state, can, is, transition } = useExperienceState()
 const {
@@ -18,16 +25,28 @@ const {
 
 const error = ref(null)
 const destinationId = ref(defaultDestinationId)
-const destination = computed(() => destinations[destinationId.value])
+const victoryDestination = computed(() => destinations[destinationId.value])
 const destinationOptions = Object.values(destinations)
+/** Which content to reveal: the selected victory reward or the failure content. */
+const outcome = ref(null)
+const revealed = computed(() => (outcome.value === 'failure' ? failureDestination : victoryDestination.value))
 
 /** Bumped on restart/exit so the path and content remount with fresh state. */
 const session = ref(0)
 const contentVisible = ref(false)
 let revealTimer = 0
 
+/** Outcomes may be swapped between branches each attempt (forkOptions.shuffle). */
+function arrangePaths() {
+  if (!forkOptions.shuffle || Math.random() < 0.5) return tracePaths
+  const outcomes = tracePaths.map((p) => p.outcome).reverse()
+  return tracePaths.map((p, i) => ({ ...p, outcome: outcomes[i] }))
+}
+const paths = ref(arrangePaths())
+
 const secure = typeof window !== 'undefined' && window.isSecureContext
-const inExperience = computed(() => is('ready', 'tracing', 'success'))
+const inExperience = computed(() => is('ready', 'tracing', 'success', 'failure'))
+const finished = computed(() => is('success', 'failure'))
 const connecting = computed(() => is('requesting-permission', 'loading-camera'))
 // Mirror front-facing cameras (incl. most laptop webcams) so movement feels natural.
 const mirrored = computed(
@@ -37,7 +56,16 @@ const mirrored = computed(
 function resetSession() {
   clearTimeout(revealTimer)
   contentVisible.value = false
+  outcome.value = null
+  paths.value = arrangePaths()
   session.value++
+}
+
+/** Trace again without restarting the camera. */
+function tryAgain() {
+  if (!finished.value) return
+  resetSession()
+  transition('ready')
 }
 
 async function start() {
@@ -76,7 +104,7 @@ function onCameraPlaying() {
 }
 
 function onCameraError(err) {
-  if (is('loading-camera', 'ready', 'tracing', 'success')) fail(cameraError('playback', err))
+  if (is('loading-camera', 'ready', 'tracing', 'success', 'failure')) fail(cameraError('playback', err))
 }
 
 function onTraceStart() {
@@ -87,14 +115,16 @@ function onTraceReset() {
   if (is('tracing')) transition('ready')
 }
 
-function onTraceComplete() {
-  if (!transition('success')) return
+function onTraceComplete({ outcome: result }) {
+  if (!transition(result === 'failure' ? 'failure' : 'success')) return
+  outcome.value = result
   revealTimer = setTimeout(() => (contentVisible.value = true), 900)
 }
 
 /** Warm the HTTP cache while the user traces so the reveal is instant. */
 function prefetchContent() {
-  const d = destination.value
+  failureDestination.images?.forEach((img) => (new Image().src = img.src))
+  const d = victoryDestination.value
   if (d.mode !== '3d') d.images?.forEach((img) => (new Image().src = img.src))
   if (d.mode !== '2d' && d.models?.length) {
     import('../components/ThreeScene.vue').catch(() => {})
@@ -106,8 +136,8 @@ onBeforeUnmount(() => clearTimeout(revealTimer))
 
 const steps = [
   { title: 'Allow camera', text: 'Your surroundings become the backdrop.', icon: 'camera' },
-  { title: 'Trace the trail', text: 'Follow the glowing path with your finger.', icon: 'finger' },
-  { title: 'Unlock the reward', text: 'Reach the star to reveal a surprise.', icon: 'star' },
+  { title: 'Choose a trail', text: 'Two paths fork from the start — trace one with your finger.', icon: 'finger' },
+  { title: 'Find the reward', text: 'One trail leads to treasure, the other to a dead end.', icon: 'star' },
 ]
 
 const btn =
@@ -128,34 +158,44 @@ const secondaryBtn =
       <TracePath
         :key="`path-${session}`"
         class="z-10"
-        :path="tracePath"
+        :paths="paths"
         :rules="traceRules"
-        :locked="is('success')"
+        :disguise="forkOptions.disguise"
+        :locked="finished"
         :dimmed="contentVisible"
         @start="onTraceStart"
         @reset="onTraceReset"
         @complete="onTraceComplete"
       />
 
-      <!-- Completion flash -->
+      <!-- Completion flash: gold for victory, red for failure -->
       <div
-        v-if="is('success')"
+        v-if="finished"
         :key="`flash-${session}`"
-        class="pointer-events-none absolute inset-0 z-10 animate-[burst_1.2s_ease-out_forwards] bg-[radial-gradient(circle_at_center,rgba(253,230,138,0.35),transparent_60%)]"
+        class="pointer-events-none absolute inset-0 z-10"
+        :class="
+          is('success')
+            ? 'animate-[burst_1.2s_ease-out_forwards] bg-[radial-gradient(circle_at_center,rgba(253,230,138,0.35),transparent_60%)]'
+            : 'animate-fade-out bg-[radial-gradient(circle_at_center,transparent_30%,rgba(225,29,72,0.45)_100%)]'
+        "
       />
 
       <Transition
         enter-active-class="transition-opacity duration-700"
         enter-from-class="opacity-0"
-        leave-active-class="transition-opacity duration-300"
+        leave-active-class="pointer-events-none transition-opacity duration-300"
         leave-to-class="opacity-0"
       >
         <DestinationContent
-          v-if="contentVisible && is('success')"
+          v-if="contentVisible && finished"
           :key="`content-${session}`"
           class="z-20"
-          :destination="destination"
-        />
+          :destination="revealed"
+        >
+          <button type="button" :class="[secondaryBtn, 'pointer-events-auto mt-3 [@media(max-height:500px)]:mt-1.5 [@media(max-height:500px)]:py-2']" data-testid="try-again" @click="tryAgain">
+            {{ is('failure') ? 'Try again' : 'Play again' }}
+          </button>
+        </DestinationContent>
       </Transition>
     </template>
 
@@ -273,7 +313,7 @@ const secondaryBtn =
                 <span class="bg-gradient-to-r from-cyan-300 via-sky-400 to-fuchsia-400 bg-clip-text text-transparent">light trail</span>
               </h1>
               <p class="mt-3 text-base text-white/75">
-                Trace a glowing path drawn over your camera view and unlock a hidden reward at the end.
+                Pick one of two glowing trails drawn over your camera view. Only one of them leads to the reward.
               </p>
             </div>
 

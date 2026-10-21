@@ -8,6 +8,7 @@ const props = defineProps({
   destination: { type: Object, required: true },
 })
 
+const tone = computed(() => props.destination.tone ?? 'victory')
 const showImages = computed(() => ['2d', 'mixed'].includes(props.destination.mode))
 const showModels = computed(() => ['3d', 'mixed'].includes(props.destination.mode) && props.destination.models?.length)
 const images = computed(() => (showImages.value ? (props.destination.images ?? []) : []))
@@ -71,7 +72,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="absolute inset-0" data-testid="destination-content" :data-mode="destination.mode">
+  <div class="absolute inset-0" data-testid="destination-content" :data-mode="destination.mode" :data-tone="tone">
     <ThreeScene
       v-if="showModels"
       :models="destination.models"
@@ -139,12 +140,17 @@ onBeforeUnmount(() => {
     >
       <div
         v-if="destination.title"
-        class="animate-pop-in rounded-3xl border border-white/20 bg-slate-950/55 px-5 py-3 text-center shadow-2xl backdrop-blur-md [animation-delay:350ms]"
+        class="animate-pop-in rounded-3xl border bg-slate-950/55 px-5 py-3 text-center shadow-2xl backdrop-blur-md [animation-delay:350ms] [@media(max-height:500px)]:py-2"
+        :class="tone === 'failure' ? 'border-rose-400/40' : 'border-white/20'"
       >
-        <h2 class="bg-gradient-to-r from-amber-100 via-amber-200 to-amber-400 bg-clip-text text-lg font-bold text-transparent">
+        <h2
+          class="bg-gradient-to-r bg-clip-text text-lg font-bold text-transparent"
+          :class="tone === 'failure' ? 'from-rose-200 via-rose-300 to-rose-500' : 'from-amber-100 via-amber-200 to-amber-400'"
+        >
           {{ destination.title }}
         </h2>
         <p v-if="destination.message" class="mt-0.5 text-sm text-white/80">{{ destination.message }}</p>
+        <slot />
       </div>
     </div>
 

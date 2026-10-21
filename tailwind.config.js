@@ -36,6 +36,10 @@ export default {
           '25%': { transform: 'translateX(-4px)' },
           '75%': { transform: 'translateX(4px)' },
         },
+        'fade-out': {
+          from: { opacity: '1' },
+          to: { opacity: '0' },
+        },
         'draw-in': {
           from: { strokeDashoffset: '1' },
           to: { strokeDashoffset: '0' },
@@ -49,6 +53,7 @@ export default {
         'pop-in': 'pop-in 0.6s cubic-bezier(0.2, 0.8, 0.3, 1.2) both',
         float: 'float 3s ease-in-out infinite',
         shake: 'shake 0.3s ease-in-out',
+        'fade-out': 'fade-out 1.2s ease-out forwards',
         'draw-in': 'draw-in 2.4s ease-out both',
       },
     },

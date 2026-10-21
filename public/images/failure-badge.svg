@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <defs>
+    <linearGradient id="stone" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#cbd5e1"/><stop offset="0.55" stop-color="#64748b"/><stop offset="1" stop-color="#334155"/>
+    </linearGradient>
+    <linearGradient id="inner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f1123"/><stop offset="1" stop-color="#4c0519"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(200 200)">
+    <circle r="150" fill="url(#stone)"/>
+    <circle r="130" fill="url(#inner)" stroke="#e2e8f0" stroke-opacity="0.6" stroke-width="4"/>
+    <!-- Broken trail -->
+    <path d="M-70 60 C-70 10 30 40 26 0" fill="none" stroke="#94a3b8" stroke-width="14" stroke-linecap="round"/>
+    <path d="M44 -24 L60 -50" fill="none" stroke="#94a3b8" stroke-width="14" stroke-linecap="round" stroke-dasharray="2 20"/>
+    <circle cx="-70" cy="60" r="13" fill="#64748b" stroke="#e2e8f0" stroke-width="4"/>
+    <!-- Cross -->
+    <g transform="translate(58 -66)" stroke="#fb7185" stroke-width="14" stroke-linecap="round">
+      <path d="M-22 -22 L22 22 M22 -22 L-22 22"/>
+    </g>
+    <!-- Crack -->
+    <path d="M-10 -150 L6 -104 L-14 -70 L10 -36" fill="none" stroke="#0f172a" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+    <text y="108" text-anchor="middle" font-family="system-ui, sans-serif" font-size="22" font-weight="800" letter-spacing="4" fill="#fecdd3">DEAD END</text>
+  </g>
+</svg>

@@ -1,6 +1,6 @@
 # Trail AR (Vue 3 + Vite + Tailwind + Three.js)
 
-A camera-backed, touch-first experience: the live camera feed fills the screen, the user traces a glowing virtual path with their finger, and reaching the destination reveals 2D images and/or animated Three.js models as screen overlays (they are not anchored to the physical world).
+A camera-backed, touch-first experience: the live camera feed fills the screen, two glowing virtual paths fork from one start point, and the user traces one with their finger. The victory path reveals 2D images and/or animated Three.js models; the failure path leads to a "dead end" screen with a Try again button. The rewards are shown as screen overlays (they are not anchored to the physical world).
 
 ```sh
 npm install
@@ -14,13 +14,13 @@ To test on a phone, serve over HTTPS (e.g. `npx vite --host` behind an HTTPS tun
 
 | File | Responsibility |
 | --- | --- |
-| `src/config/destinations.js` | Trace path (normalized 0..1 coords, `line` / `quadratic` / `cubic` segments), completion rules, and destination content (`2d`, `3d`, `mixed`). |
+| `src/config/destinations.js` | `tracePaths` (each with an `outcome`: `victory` / `failure`; normalized 0..1 coords, `line` / `quadratic` / `cubic` segments), `forkOptions` (`disguise` hides which is which, `shuffle` swaps them each attempt), completion rules, victory content (`2d`, `3d`, `mixed`) and `failureDestination`. |
 | `src/lib/pathGeometry.js` | Pure geometry: flattening, projection onto the path, markers. |
-| `src/lib/pathTracker.js` | Pure tracing rules: start-near-beginning, local matching window (no shortcuts), coverage, deviations, resume, completion. `DEFAULT_RULES` documents every option. |
+| `src/lib/pathTracker.js` | Pure tracing rules: start-near-beginning, local matching window (no shortcuts), coverage, deviations, resume, completion. `DEFAULT_RULES` documents every option. `createPathSetTracker` traces several paths in parallel and drops a branch once the finger leaves it. |
 | `src/composables/usePathTracing.js` | Pointer events, resize handling, and rAF-smoothed progress for the tracker. |
 | `src/composables/useCamera.js` | `getUserMedia` (rear camera preferred, video only), error mapping, track cleanup. |
 | `src/composables/useThreeScene.js` | Transparent WebGL overlay, `GLTFLoader`, animation, drag/tap interaction, full disposal. |
-| `src/composables/useExperienceState.js` | State machine: `welcome → requesting-permission → loading-camera → ready ⇄ tracing → success`, plus `error`. |
+| `src/composables/useExperienceState.js` | State machine: `welcome → requesting-permission → loading-camera → ready ⇄ tracing → success \| failure`, plus `error`. |
 | `src/views/ARExperience.vue` | Orchestrates the flow, restart and exit. |
 
 Reward assets are in `public/images` and `public/models`. Models are auto-centered and scaled to `fitSize`, so any `.glb` / `.gltf` can be dropped in. Images and models accept an optional `landscape` override for wide viewports.

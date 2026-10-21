@@ -1,9 +1,10 @@
 import { onBeforeUnmount, onMounted, reactive, shallowRef } from 'vue'
 import { buildPathGeometry, directionMarkers } from '../lib/pathGeometry.js'
-import { createPathTracker } from '../lib/pathTracker.js'
+import { createPathSetTracker } from '../lib/pathTracker.js'
 
 /**
- * Connects the pure path tracker to a DOM region.
+ * Connects the pure path-set tracker to a DOM region. Supports one or more
+ * paths (e.g. a fork with victory and failure branches).
  *
  * - Pointer events on `regionRef` (single active pointer, coalesced events).
  * - Rebuilds geometry when the region resizes (rotation, browser resize).
@@ -14,18 +15,20 @@ import { createPathTracker } from '../lib/pathTracker.js'
  *
  * @param {import('vue').Ref<HTMLElement|null>} regionRef
  * @param {{
- *   path: object,
+ *   paths: { id: string }[],   path definitions (see src/config/destinations.js)
  *   rules?: object,
  *   disabled?: () => boolean,
  *   onEvent?: (name: string, snapshot: object) => void,
- *   onFrame?: (frame: { progress: number, pointer: {x,y}|null, nearest: {x,y}|null, proximity: string }) => void,
+ *   onFrame?: (frame: { progress: number, progressById: Record<string, number>, pointer: {x,y}|null, nearest: {x,y}|null, proximity: string }) => void,
  * }} options
  */
-export function usePathTracing(regionRef, { path, rules, disabled = () => false, onEvent, onFrame }) {
-  const tracker = createPathTracker(rules)
-  const geometry = shallowRef(null)
-  const markers = shallowRef([])
+export function usePathTracing(regionRef, { paths, rules, disabled = () => false, onEvent, onFrame }) {
+  const ids = paths.map((p) => p.id)
+  const tracker = createPathSetTracker(ids, rules)
+  /** [{ id, definition, geometry, markers }] — rebuilt on resize. */
+  const layout = shallowRef(null)
   const state = reactive({
+    pathId: ids[0],
     phase: 'idle',
     proximity: 'none',
     percent: 0,
@@ -39,8 +42,9 @@ export function usePathTracing(regionRef, { path, rules, disabled = () => false,
   let rect = null
   let pointer = null
   let nearest = null
-  let targetProgress = 0
-  let displayProgress = 0
+  // Per-path progress: target from the tracker, display eased towards it.
+  const target = Object.fromEntries(ids.map((id) => [id, 0]))
+  const display = { ...target }
   let activePointerId = null
   let raf = 0
   let lastFrameTime = 0
@@ -55,21 +59,27 @@ export function usePathTracing(regionRef, { path, rules, disabled = () => false,
     const dt = lastFrameTime ? Math.min(0.1, (now - lastFrameTime) / 1000) : 1 / 60
     lastFrameTime = now
     // Exponential smoothing (~55 ms time constant): fluid but never laggy.
-    const diff = targetProgress - displayProgress
-    displayProgress = Math.abs(diff) < 0.0005 ? targetProgress : displayProgress + diff * (1 - Math.exp(-dt * 18))
-    onFrame?.({ progress: displayProgress, pointer, nearest, proximity: state.proximity })
-    if (displayProgress !== targetProgress) requestFrame()
+    const k = 1 - Math.exp(-dt * 18)
+    let moving = false
+    for (const id of ids) {
+      const diff = target[id] - display[id]
+      display[id] = Math.abs(diff) < 0.0005 ? target[id] : display[id] + diff * k
+      if (display[id] !== target[id]) moving = true
+    }
+    onFrame?.({ progress: display[state.pathId], progressById: display, pointer, nearest, proximity: state.proximity })
+    if (moving) requestFrame()
     else lastFrameTime = 0
   }
 
   function apply(snap) {
+    state.pathId = snap.pathId
     state.phase = snap.phase
     state.proximity = snap.proximity
     state.percent = Math.round(snap.progress * 100)
     state.coverage = Math.round(snap.coverage * 100) / 100
     state.deviations = snap.deviations
     state.tolerance = Math.round(snap.tolerance)
-    targetProgress = snap.progress
+    Object.assign(target, snap.progressById)
     nearest = snap.proximity === 'none' ? null : snap.nearest
     for (const name of snap.events) onEvent?.(name, snap)
     requestFrame()
@@ -77,7 +87,7 @@ export function usePathTracing(regionRef, { path, rules, disabled = () => false,
 
   /** Client coords → normalized (0..1) in the region → geometry pixels. */
   function toLocal(e) {
-    const g = geometry.value
+    const g = layout.value[0].geometry
     const nx = (e.clientX - rect.left) / rect.width
     const ny = (e.clientY - rect.top) / rect.height
     return { x: nx * g.width, y: ny * g.height }
@@ -94,7 +104,7 @@ export function usePathTracing(regionRef, { path, rules, disabled = () => false,
   }
 
   function onPointerDown(e) {
-    if (activePointerId !== null || !geometry.value || disabled()) return
+    if (activePointerId !== null || !layout.value || disabled()) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
     rect = regionRef.value.getBoundingClientRect()
@@ -106,7 +116,7 @@ export function usePathTracing(regionRef, { path, rules, disabled = () => false,
   }
 
   function onPointerMove(e) {
-    if (e.pointerId !== activePointerId || !geometry.value) return
+    if (e.pointerId !== activePointerId || !layout.value) return
     const coalesced = e.getCoalescedEvents?.()
     const pts = (coalesced?.length ? coalesced : [e]).map(toLocal)
     pointer = pts[pts.length - 1]
@@ -136,13 +146,16 @@ export function usePathTracing(regionRef, { path, rules, disabled = () => false,
     rect = el.getBoundingClientRect()
     if (rect.width < 2 || rect.height < 2) return
     interrupt()
-    const g = buildPathGeometry(path, rect.width, rect.height)
-    tracker.setGeometry(g)
-    geometry.value = g
+    const built = paths.map((definition) => {
+      const geometry = buildPathGeometry(definition, rect.width, rect.height)
+      tracker.setGeometry(definition.id, geometry)
+      return { id: definition.id, definition, geometry }
+    })
     const snap = tracker.getState()
-    markers.value = directionMarkers(g, Math.max(44, snap.tolerance * 2.2))
+    for (const item of built) item.markers = directionMarkers(item.geometry, Math.max(44, snap.tolerance * 2.2))
+    layout.value = built
     // Jump the display straight to the current progress after a resize.
-    displayProgress = snap.progress
+    Object.assign(display, snap.progressById)
     apply(snap)
   }
 
@@ -181,5 +194,5 @@ export function usePathTracing(regionRef, { path, rules, disabled = () => false,
     raf = 0
   })
 
-  return { geometry, markers, state, reset }
+  return { layout, state, reset }
 }

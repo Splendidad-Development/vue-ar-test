@@ -273,3 +273,121 @@ export function createPathTracker(userRules) {
     getState: () => snapshot(),
   }
 }
+
+const PROXIMITY_RANK = { on: 0, drifting: 1, off: 2, none: 3 }
+
+/**
+ * Tracks several paths at once (e.g. a fork with a victory and a failure
+ * branch sharing the same start).
+ *
+ * Every path whose start (or resume point) is touched becomes a candidate.
+ * Candidates are traced in parallel; once the finger is on one candidate and
+ * off another, the stray one is dropped. The first candidate to complete
+ * decides the outcome. Events and the main snapshot come from the "primary"
+ * candidate: the one the finger is closest to following.
+ *
+ * Snapshots carry `pathId` (primary) and `progressById` (every path).
+ */
+export function createPathSetTracker(ids, userRules) {
+  const trackers = new Map(ids.map((id) => [id, createPathTracker(userRules)]))
+  let candidates = []
+  let primary = ids[0]
+  let completed = null
+
+  const stateOf = (id, snaps) => snaps?.get(id) ?? trackers.get(id).getState()
+
+  function pickPrimary(snaps) {
+    if (completed) return completed
+    const pool = candidates.length ? candidates : ids
+    return [...pool].sort((a, b) => {
+      const sa = stateOf(a, snaps)
+      const sb = stateOf(b, snaps)
+      return PROXIMITY_RANK[sa.proximity] - PROXIMITY_RANK[sb.proximity] || sb.progress - sa.progress
+    })[0]
+  }
+
+  function combine(snaps, events) {
+    primary = pickPrimary(snaps)
+    const snap = stateOf(primary, snaps)
+    const progressById = Object.fromEntries(ids.map((id) => [id, stateOf(id, snaps).progress]))
+    return { ...snap, events: events ?? snap.events ?? [], pathId: primary, progressById }
+  }
+
+  function drop(id) {
+    trackers.get(id).reset()
+    candidates = candidates.filter((c) => c !== id)
+  }
+
+  function pointerDown(p) {
+    if (completed) return combine(null, [])
+    const snaps = new Map()
+    const accepted = []
+    for (const [id, t] of trackers) {
+      const s = t.pointerDown(p)
+      snaps.set(id, s)
+      if (s.events.includes('start') || s.events.includes('resume')) accepted.push(id)
+    }
+    if (!accepted.length) {
+      candidates = []
+      const shortcut = [...snaps.values()].some((s) => s.events.includes('reject-shortcut'))
+      return combine(snaps, [shortcut ? 'reject-shortcut' : 'reject-start'])
+    }
+    // Paths that did not accept this touch start over.
+    for (const id of ids) if (!accepted.includes(id)) trackers.get(id).reset()
+    candidates = accepted
+    return combine(snaps)
+  }
+
+  function pointerMove(pts) {
+    if (completed || !candidates.length) return combine(null, [])
+    const snaps = new Map(candidates.map((id) => [id, trackers.get(id).pointerMove(pts)]))
+
+    const done = candidates.find((id) => snaps.get(id).phase === 'complete')
+    if (done) {
+      completed = done
+      for (const id of candidates) if (id !== done) trackers.get(id).reset()
+      candidates = [done]
+      return combine(snaps)
+    }
+
+    if (candidates.length > 1) {
+      const anyOn = candidates.some((id) => snaps.get(id).proximity === 'on')
+      for (const id of [...candidates]) {
+        const s = snaps.get(id)
+        const stray = (anyOn && s.proximity === 'off') || s.phase === 'idle'
+        if (stray && candidates.length > 1) {
+          drop(id)
+          snaps.delete(id)
+        }
+      }
+    }
+    const result = combine(snaps)
+    if (result.phase === 'idle') candidates = [] // reset after too many deviations
+    return result
+  }
+
+  function pointerUp() {
+    if (completed) return combine(null, [])
+    const snaps = new Map(candidates.map((id) => [id, trackers.get(id).pointerUp()]))
+    const result = combine(snaps)
+    candidates = candidates.filter((id) => trackers.get(id).getState().progress > 0)
+    return result
+  }
+
+  function reset() {
+    for (const t of trackers.values()) t.reset()
+    candidates = []
+    completed = null
+    primary = ids[0]
+  }
+
+  return {
+    setGeometry: (id, g) => trackers.get(id).setGeometry(g),
+    pointerDown,
+    pointerMove,
+    pointerUp,
+    cancel: pointerUp,
+    reset,
+    getState: () => combine(null, []),
+  }
+}

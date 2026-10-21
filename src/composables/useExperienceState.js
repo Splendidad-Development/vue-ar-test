@@ -3,9 +3,10 @@ import { readonly, ref } from 'vue'
 /**
  * Experience state machine. Only the transitions listed here are allowed.
  *
- *   welcome ─start─▶ requesting-permission ─▶ loading-camera ─▶ ready ⇄ tracing ─▶ success
+ *   welcome ─start─▶ requesting-permission ─▶ loading-camera ─▶ ready ⇄ tracing ─▶ success | failure
  *                          ▲      (any camera failure) ─▶ error ─retry─┘
- *   restart: ready | tracing | success ─▶ requesting-permission
+ *   try again: success | failure ─▶ ready (camera keeps running)
+ *   restart: ready | tracing | success | failure ─▶ requesting-permission
  *   exit:    any ─▶ welcome
  */
 export const TRANSITIONS = {
@@ -13,8 +14,9 @@ export const TRANSITIONS = {
   'requesting-permission': ['loading-camera', 'error', 'welcome'],
   'loading-camera': ['ready', 'error', 'welcome'],
   ready: ['tracing', 'requesting-permission', 'error', 'welcome'],
-  tracing: ['ready', 'success', 'requesting-permission', 'error', 'welcome'],
-  success: ['requesting-permission', 'error', 'welcome'],
+  tracing: ['ready', 'success', 'failure', 'requesting-permission', 'error', 'welcome'],
+  success: ['ready', 'requesting-permission', 'error', 'welcome'],
+  failure: ['ready', 'requesting-permission', 'error', 'welcome'],
   error: ['requesting-permission', 'welcome'],
 }
 
